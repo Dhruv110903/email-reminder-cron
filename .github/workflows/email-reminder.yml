@@ -1,7 +1,7 @@
 name: Email Reminder Cron Job
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Every 5 minutes
+     - cron: '*/15 * * * *'   # Every 15 minutes
   workflow_dispatch:  # Allows manual triggering
 
 jobs:
