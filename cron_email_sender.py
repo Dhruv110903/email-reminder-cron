@@ -8,6 +8,7 @@ import ssl
 from email.message import EmailMessage
 import os
 from pyairtable import Table
+from pyairtable import Api
 from dotenv import load_dotenv
 import pytz
 import sys
@@ -56,28 +57,13 @@ def send_email(subject, body, to):
 
 def check_and_send_due_reminders():
     """Check for due reminders and send them"""
-    
-    # Debug: Check what environment variables are available
-    print("🔍 DEBUG: Checking environment variables...")
-    print(f"EMAIL_ADDRESS: {'✅ Set' if EMAIL_ADDRESS else '❌ Missing'}")
-    print(f"EMAIL_PASSWORD: {'✅ Set' if EMAIL_PASSWORD else '❌ Missing'}")
-    print(f"AIRTABLE_TOKEN: {'✅ Set' if AIRTABLE_PERSONAL_ACCESS_TOKEN else '❌ Missing'}")
-    print(f"AIRTABLE_BASE_ID: {'✅ Set' if AIRTABLE_BASE_ID else '❌ Missing'}")
-    print(f"AIRTABLE_TABLE_NAME: {'✅ Set' if AIRTABLE_TABLE_NAME else '❌ Missing'}")
-    
-    if not all([EMAIL_ADDRESS, EMAIL_PASSWORD, AIRTABLE_PERSONAL_ACCESS_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME]):
-        print("❌ ERROR: Missing required environment variables")
-        return 0, 1
-    
-    # Rest of your existing code...
-    
-    """Check for due reminders and send them"""
     if not all([EMAIL_ADDRESS, EMAIL_PASSWORD, AIRTABLE_PERSONAL_ACCESS_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME]):
         print("ERROR: Missing required environment variables")
         return 0, 1
     
     try:
-        table = Table(AIRTABLE_PERSONAL_ACCESS_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
+        # table = Table(AIRTABLE_PERSONAL_ACCESS_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
+        table = Api(AIRTABLE_PERSONAL_ACCESS_TOKEN).table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
         current_time_ist = get_ist_now()
         print(f"[{current_time_ist.strftime('%Y-%m-%d %H:%M:%S IST')}] Checking for due reminders...")
         
