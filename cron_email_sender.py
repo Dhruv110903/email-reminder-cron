@@ -122,7 +122,7 @@ def check_and_send_due_reminders():
         return 0, 1
 
 if __name__ == "__main__":
-    print("Starting email reminder cron job...")
+    print("Starting email reminder cron job service...")
     sent, errors = check_and_send_due_reminders()
     
     # Exit with appropriate code
