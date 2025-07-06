@@ -20,6 +20,12 @@ jobs:
         run: |
           pip install -r requirements.txt
       
+      - name: Decode token.json
+        run: |
+          echo "$GMAIL_TOKEN_BASE64" | base64 --decode > token.json
+        env:
+          GMAIL_TOKEN_BASE64: ${{ secrets.GMAIL_TOKEN_BASE64 }}
+
       - name: Setup Google API credentials
         env:
           CREDENTIALS_JSON_B64: ${{ secrets.CREDENTIALS_JSON_B64 }}
