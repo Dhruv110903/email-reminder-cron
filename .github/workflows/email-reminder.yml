@@ -3,7 +3,7 @@ on:
   schedule:
      - cron: '*/15 * * * *'   # Every 15 minutes
   workflow_dispatch:  # Allows manual triggering
-
+  
 jobs:
   send-reminders:
     runs-on: ubuntu-latest
@@ -20,6 +20,14 @@ jobs:
         run: |
           pip install -r requirements.txt
       
+      - name: Setup Google API credentials
+        env:
+          CREDENTIALS_JSON_B64: ${{ secrets.CREDENTIALS_JSON_B64 }}
+          TOKEN_JSON_B64: ${{ secrets.TOKEN_JSON_B64 }}
+        run: |
+          echo "$CREDENTIALS_JSON_B64" | base64 --decode > credentials.json
+          echo "$TOKEN_JSON_B64" | base64 --decode > token.json
+
       - name: Run email reminder script
         env:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
