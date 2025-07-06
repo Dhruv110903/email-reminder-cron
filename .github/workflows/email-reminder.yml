@@ -1,32 +1,28 @@
 name: Email Reminder Cron Job
+
 on:
   schedule:
-     - cron: '*/1200 * * * *'   # Every 15 minutes
-  workflow_dispatch:  # Allows manual triggering
-  
+    - cron: '*/1500 * * * *'  # Every 15 minutes
+  workflow_dispatch:  # Allow manual run
+
 jobs:
   send-reminders:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-      
+
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-      
-      - name: Decode token.json
-        run: |
-          echo "$GMAIL_TOKEN_BASE64" | base64 --decode > token.json
-        env:
-          GMAIL_TOKEN_BASE64: ${{ secrets.GMAIL_TOKEN_BASE64 }}
 
-      - name: Setup Google API credentials
+      - name: Decode credentials.json and token.json
         env:
           CREDENTIALS_JSON_B64: ${{ secrets.CREDENTIALS_JSON_B64 }}
           TOKEN_JSON_B64: ${{ secrets.TOKEN_JSON_B64 }}
