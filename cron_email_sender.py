@@ -1,41 +1,46 @@
 import os
 import sys
 import time
-from datetime import datetime
-import pytz
 import base64
 import re
+from datetime import datetime
+from dotenv import load_dotenv
+from pyairtable import Api
+import pytz
+
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from pyairtable import Api
-from dotenv import load_dotenv
+from bs4 import BeautifulSoup
 
 load_dotenv()
 
-# -------- TIMEZONE SETUP -------- #
-IST = pytz.timezone('Asia/Kolkata')
-
-# -------- CONFIG -------- #
+# ----------- CONFIG ----------- #
 EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 AIRTABLE_PERSONAL_ACCESS_TOKEN = os.getenv("AIRTABLE_PERSONAL_ACCESS_TOKEN")
 AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 AIRTABLE_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME")
-
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
-# -------- Helper functions -------- #
+IST = pytz.timezone('Asia/Kolkata')
+
+# ----------- UTILS ----------- #
 def get_ist_now():
     return datetime.now(IST)
 
-def convert_to_ist(dt):
-    if dt.tzinfo is None:
-        return IST.localize(dt)
-    else:
-        return dt.astimezone(IST)
+def parse_bill_date(date_str):
+    if not date_str:
+        return None
+    try:
+        return datetime.fromisoformat(date_str)
+    except ValueError:
+        pass
+    try:
+        return datetime.strptime(date_str, '%d-%b-%y')
+    except ValueError:
+        raise ValueError(f"Unknown BILL Date format: {date_str}")
 
-# -------- Reminder Email Sender -------- #
 def send_email(subject, body, to):
     import smtplib
     import ssl
@@ -54,102 +59,70 @@ def send_email(subject, body, to):
             smtp.send_message(msg)
         return True
     except Exception as e:
-        print(f"Error sending email to {to}: {e}")
+        print(f"❌ Email error to {to}: {e}")
         return False
 
-def parse_bill_date(date_str):
-    if not date_str:
-        return None
-
-    # Try ISO format first
-    try:
-        return datetime.fromisoformat(date_str)
-    except ValueError:
-        pass
-
-    # Try dd-Mmm-yy format like '28-Sep-24'
-    try:
-        return datetime.strptime(date_str, '%d-%b-%y')
-    except ValueError:
-        pass
-
-    # Unknown format
-    raise ValueError(f"Unknown date format: {date_str}")
-
+# ----------- REMINDER LOGIC ----------- #
 def check_and_send_due_reminders():
-    """Send reminders for all records whose BILL Date 1 is today or earlier"""
+    print(f"[{get_ist_now().strftime('%Y-%m-%d %H:%M:%S IST')}] Checking for due reminders...")
     if not all([EMAIL_ADDRESS, EMAIL_PASSWORD, AIRTABLE_PERSONAL_ACCESS_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME]):
-        print("ERROR: Missing required environment variables")
+        print("❌ ERROR: Missing required environment variables")
         return 0, 1
 
     try:
         table = Api(AIRTABLE_PERSONAL_ACCESS_TOKEN).table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
-        ist = pytz.timezone('Asia/Kolkata')
-        current_time_ist = datetime.now(ist)
-        print(f"[{current_time_ist.strftime('%Y-%m-%d %H:%M:%S IST')}] Checking for due reminders based on BILL Date 1...")
+        current_time = get_ist_now()
 
         records = table.all()
-        sent_count = 0
-        error_count = 0
+        sent = 0
+        errors = 0
 
         for record in records:
-            fields = record.get('fields', {})
-            bill_date_str = fields.get('BILL Date 1', '')
-            isin = fields.get('ISIN', '')
-            email = fields.get('Email ID', '')
-            bill_amount = fields.get('Bill Amount', '')
-
-            if not bill_date_str:
-                print(f"Skipping record with ISIN {isin} due to empty BILL Date 1")
+            f = record.get('fields', {})
+            if f.get("Reminder Sent", False):  # ✅ Skip already sent
                 continue
-            if not email:
-                print(f"Skipping record with ISIN {isin} due to missing email")
+
+            bill_date_str = f.get('BILL Date 1', '')
+            email = f.get('Email ID', '')
+            isin = f.get('ISIN', '')
+            bill_amount = f.get('Bill Amount', '')
+
+            if not bill_date_str or not email:
                 continue
 
             try:
-                dt = parse_bill_date(bill_date_str)
+                bill_date = parse_bill_date(bill_date_str)
+                if bill_date.tzinfo is None:
+                    bill_date = pytz.utc.localize(bill_date)
+                bill_date_ist = bill_date.astimezone(IST)
 
-                # If naive datetime, assume UTC
-                if dt.tzinfo is None:
-                    dt = pytz.utc.localize(dt)
-
-                dt_ist = dt.astimezone(ist)
-
-                if current_time_ist >= dt_ist:
-                    # subject = f"TEST Reminder: BILL Due for ISIN -{isin}"
-                    subject = f"TEST Reminder: BILL Due for ISIN -ISIN12345"
+                if current_time >= bill_date_ist:
+                    subject = f"Reminder: BILL Due for ISIN - {isin}"
                     message = (
                         f"Dear user,\n\n"
-                        f"This is a test reminder that the BILL dated {dt_ist.strftime('%Y-%m-%d')} "
+                        f"This is a reminder that the BILL dated {bill_date_ist.strftime('%Y-%m-%d')} "
                         f"for ISIN {isin} with amount {bill_amount} is due.\n\n"
                         f"Please take the necessary action.\n\n"
-                        f"Best regards,\nYour Reminder System"
+                        f"Regards,\nReminder System"
                     )
-
-                    print(f"Sending reminder to {email} for ISIN {isin} with BILL Date {dt_ist.strftime('%Y-%m-%d')}")
-                    test_email = "dhruv.vatsa1111@gmail.com"
-                    if send_email(subject, message, test_email):
-                        print(f"✅ Successfully sent reminder to {email}")
-                        sent_count += 1
+                    if send_email(subject, message, email):
+                        print(f"✅ Sent reminder to {email} for ISIN {isin}")
+                        table.update(record['id'], {"Reminder Sent": True})
+                        sent += 1
                     else:
-                        print(f"❌ Failed to send reminder to {email}")
-                        error_count += 1
-                else:
-                    print(f"Reminder NOT due yet for ISIN {isin} on {dt_ist.strftime('%Y-%m-%d')}")
-
+                        errors += 1
             except Exception as e:
-                print(f"Failed to parse BILL Date 1 '{bill_date_str}' for ISIN {isin}: {e}")
-                error_count += 1
+                print(f"❌ Reminder error for ISIN {isin}: {e}")
+                errors += 1
 
-        print(f"Completed: {sent_count} reminders sent, {error_count} errors")
-        return sent_count, error_count
+        print(f"✅ Completed: {sent} sent, {errors} errors")
+        return sent, errors
 
     except Exception as e:
-        print(f"Error in check_and_send_due_reminders: {e}")
+        print(f"❌ Error in check_and_send_due_reminders: {e}")
         return 0, 1
 
-
-# -------- Gmail API Helpers for ISIN fetch -------- #
+# ----------- GMAIL ISIN EXTRACTION ----------- #
 def authenticate_gmail():
     creds = None
     if os.path.exists('token.json'):
@@ -162,52 +135,50 @@ def authenticate_gmail():
     return build('gmail', 'v1', credentials=creds)
 
 def get_email_body(payload):
-    plain_text = None
-    html_content = None
+    plain, html = None, None
     if 'parts' in payload:
         for part in payload['parts']:
-            pt, ht = get_email_body(part)
-            if pt and not plain_text:
-                plain_text = pt
-            if ht and not html_content:
-                html_content = ht
+            p_txt, h_txt = get_email_body(part)
+            plain = plain or p_txt
+            html = html or h_txt
     else:
         mime_type = payload.get('mimeType')
         data = payload.get('body', {}).get('data')
         if data:
             decoded = base64.urlsafe_b64decode(data).decode(errors='replace')
             if mime_type == 'text/plain':
-                plain_text = decoded
+                plain = decoded
             elif mime_type == 'text/html':
-                html_content = decoded
-    return plain_text, html_content
+                html = decoded
+    return plain, html
 
 def extract_isin_details_from_text(text):
     results = []
     for line in text.splitlines():
         line = line.strip()
-        if not line or 'Company' in line or 'ISIN' in line or 'Instrument' in line:
-            continue
         match = re.search(r'(INE[A-Z0-9]{9})', line)
         if match:
             isin = match.group(1)
-            parts = line.split()
-            isin_index = parts.index(isin)
-            company = " ".join(parts[:isin_index])
-            instrument = " ".join(parts[isin_index+1:])
-            results.append({
-                "Company": company,
-                "ISIN": isin,
-                "Instrument": instrument
-            })
+            clean_line = re.sub(r'[^\w\s\-]', '', line)  # Remove special chars
+            parts = clean_line.split()
+            isin_index = next((i for i, part in enumerate(parts) if isin in part), -1)
+            if isin_index != -1:
+                company = " ".join(parts[:isin_index])
+                instrument = " ".join(parts[isin_index + 1:])
+                results.append({
+                    "Company": company.strip(),
+                    "ISIN": isin.strip(),
+                    "Instrument": instrument.strip()
+                })
+            else:
+                print(f"⚠️ ISIN {isin} found but not in parts: {parts}")
     return results
 
-def isin_record_exists(table, company_name, isin):
+def isin_record_exists(table, isin):
     records = table.all()
     for r in records:
         f = r.get("fields", {})
-        if f.get("Company Name", "").strip().lower() == company_name.strip().lower() and \
-           f.get("ISIN", "").strip().lower() == isin.strip().lower():
+        if f.get("ISIN", "").strip().lower() == isin.strip().lower():
             return True
     return False
 
@@ -215,62 +186,45 @@ def fetch_and_append_new_isin_records():
     try:
         service = authenticate_gmail()
         table = Api(AIRTABLE_PERSONAL_ACCESS_TOKEN).table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
-        
-        # Query emails with subject "ISIN Activated" from last 7 days (or adjust as needed)
-        from_time = int(time.time()) - 7*24*60*60
+
+        from_time = int(time.time()) - 7 * 24 * 60 * 60
         query = f'subject:"ISIN Activated" after:{from_time}'
         results = service.users().messages().list(userId='me', q=query, maxResults=20).execute()
         messages = results.get('messages', [])
-        
-        new_records_added = 0
+        new_records = 0
+
         for msg in messages:
             msg_data = service.users().messages().get(userId='me', id=msg['id'], format='full').execute()
-            headers = msg_data['payload']['headers']
-
-            subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), '')
-            # You can print or log subject if needed
-            
             payload = msg_data['payload']
-            plain_text, html_content = get_email_body(payload)
+            plain, html = get_email_body(payload)
+            text = plain or BeautifulSoup(html or "", "html.parser").get_text(separator="\n")
 
-            text_to_parse = plain_text or (BeautifulSoup(html_content, "html.parser").get_text(separator="\n") if html_content else None)
+            for entry in extract_isin_details_from_text(text):
+                isin = entry["ISIN"]
+                company = entry["Company"]
+                instrument = entry["Instrument"]
 
-            if text_to_parse:
-                extracted = extract_isin_details_from_text(text_to_parse)
-                for entry in extracted:
-                    company = entry["Company"]
-                    isin = entry["ISIN"]
-                    instrument = entry["Instrument"]
+                if not isin_record_exists(table, isin):
+                    record = {
+                        "ISIN": isin,
+                        "Security Type": instrument,
+                        "Company Name": company,
+                        "ISIN Allotment Date": datetime.now().strftime("%Y-%m-%d")
+                    }
+                    table.create(record)
+                    print(f"➕ Added ISIN: {isin} | {company} | {instrument}")
+                    new_records += 1
+        print(f"📬 Total new ISINs added: {new_records}")
+        return new_records
 
-                    if not isin_record_exists(table, company, isin):
-                        record = {
-                            "ISIN": isin,
-                            "Security Type": instrument,
-                            "Company Name": company,
-                            "ISIN Allotment Date": datetime.now().strftime("%Y-%m-%d")
-                        }
-                        try:
-                            table.create(record)
-                            print(f"Added new ISIN record: {company} - {isin}")
-                            new_records_added += 1
-                        except Exception as e:
-                            print(f"Error adding record for {company}: {e}")
-        
-        print(f"Total new ISIN records added: {new_records_added}")
-        return new_records_added
-    
     except Exception as e:
-        print(f"Error in fetch_and_append_new_isin_records: {e}")
+        print(f"❌ Error in fetch_and_append_new_isin_records: {e}")
         return 0
 
-# -------- Main -------- #
+# ----------- MAIN ----------- #
 if __name__ == "__main__":
-    print("Starting cron job...")
+    print("🚀 Starting cron job...")
     sent, errors = check_and_send_due_reminders()
     new_isins = fetch_and_append_new_isin_records()
-    print(f"Summary: Sent reminders: {sent}, Errors: {errors}, New ISINs added: {new_isins}")
-    
-    if errors > 0:
-        sys.exit(1)
-    else:
-        sys.exit(0)
+    print(f"📬 Summary: Sent reminders: {sent}, Errors: {errors}, New ISINs added: {new_isins}")
+    sys.exit(1 if errors else 0)
