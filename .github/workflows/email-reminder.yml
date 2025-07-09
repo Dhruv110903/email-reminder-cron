@@ -2,7 +2,7 @@ name: Email Reminder Cron Job
 
 on:
   schedule:
-    - cron: '*/1500 * * * *'  # Every 15 minutes
+    - cron: '*/60 * * * *'  # Every 15 minutes
   workflow_dispatch:  # Allow manual run
 
 jobs:
@@ -37,4 +37,6 @@ jobs:
           AIRTABLE_PERSONAL_ACCESS_TOKEN: ${{ secrets.AIRTABLE_PERSONAL_ACCESS_TOKEN }}
           AIRTABLE_BASE_ID: ${{ secrets.AIRTABLE_BASE_ID }}
           AIRTABLE_TABLE_NAME: ${{ secrets.AIRTABLE_TABLE_NAME }}
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }} 
+          
         run: python cron_email_sender.py
